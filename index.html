@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>RL Agent + Graph</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background:black; color:white; text-align:center; font-family:sans-serif; }
+    canvas { background:#111; margin:10px; }
+  </style>
+</head>
+<body>
+
+<h2>RL Agent Learning 📈</h2>
+
+<canvas id="game" width="500" height="500"></canvas>
+<canvas id="chart" width="500" height="200"></canvas><br>
+
+<button onclick="setSpeed(1)">1x</button>
+<button onclick="setSpeed(5)">5x</button>
+<button onclick="setSpeed(20)">Fast</button>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const gridSize = 20;
+const tileSize = canvas.width / gridSize;
+
+let agent = {x:10,y:10};
+let target = {x:5,y:5};
+
+let score = 0;
+let step = 0;
+let speed = 1;
+
+// NN
+const inputSize = 4;
+const hiddenSize = 32;
+const outputSize = 4;
+
+let W1 = Array.from({length:hiddenSize},()=>Array.from({length:inputSize},()=>Math.random()*0.2-0.1));
+let b1 = Array(hiddenSize).fill(0);
+let W2 = Array.from({length:outputSize},()=>Array.from({length:hiddenSize},()=>Math.random()*0.2-0.1));
+let b2 = Array(outputSize).fill(0);
+
+let epsilon = 0.6;
+const alpha = 0.03;
+const gamma = 0.9;
+
+// GRAPH
+let chart = new Chart(document.getElementById("chart"), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: "Targets Reached",
+      data: [],
+      borderWidth: 2,
+      tension: 0.25
+    }]
+  }
+});
+
+// ACTIVATION
+function relu(x){ return x.map(v=>Math.max(0,v)); }
+function reluDeriv(x){ return x.map(v=>v>0?1:0); }
+
+// INPUT
+function getInput(){
+  return [
+    (target.x-agent.x)/gridSize,
+    (target.y-agent.y)/gridSize,
+    agent.x/gridSize,
+    agent.y/gridSize
+  ];
+}
+
+// FORWARD
+function forward(input){
+  let h = [];
+  for(let i=0;i<hiddenSize;i++){
+    let sum = b1[i];
+    for(let j=0;j<inputSize;j++) sum += W1[i][j]*input[j];
+    h.push(sum);
+  }
+  let hAct = relu(h);
+
+  let out = [];
+  for(let i=0;i<outputSize;i++){
+    let sum = b2[i];
+    for(let j=0;j<hiddenSize;j++) sum += W2[i][j]*hAct[j];
+    out.push(sum);
+  }
+
+  return {input, h, hAct, out};
+}
+
+// ACTION
+function chooseAction(out){
+  if(Math.random() < epsilon) return Math.floor(Math.random()*outputSize);
+  return out.indexOf(Math.max(...out));
+}
+
+// MOVE
+function move(a){
+  if(a===0 && agent.y>0) agent.y--;
+  if(a===1 && agent.y<gridSize-1) agent.y++;
+  if(a===2 && agent.x>0) agent.x--;
+  if(a===3 && agent.x<gridSize-1) agent.x++;
+}
+
+// STEP
+function stepAI(){
+  step++;
+
+  let f = forward(getInput());
+  let action = chooseAction(f.out);
+
+  let oldDist = Math.abs(agent.x-target.x)+Math.abs(agent.y-target.y);
+
+  move(action);
+
+  let newDist = Math.abs(agent.x-target.x)+Math.abs(agent.y-target.y);
+
+  let reward = oldDist - newDist;
+
+  if(agent.x===target.x && agent.y===target.y){
+    reward += 5;
+    score++;
+
+    // graph update
+    chart.data.labels.push(step);
+    chart.data.datasets[0].data.push(score);
+    chart.update();
+
+    target = {
+      x: Math.floor(Math.random()*gridSize),
+      y: Math.floor(Math.random()*gridSize)
+    };
+  }
+
+  // Q target
+  let next = forward(getInput());
+  let targetQ = f.out.slice();
+  targetQ[action] = reward + gamma*Math.max(...next.out);
+
+  let error = targetQ.map((t,i)=>t - f.out[i]);
+
+  // BACKPROP
+  let hError = Array(hiddenSize).fill(0);
+  let hDer = reluDeriv(f.h);
+
+  for(let j=0;j<hiddenSize;j++){
+    let sum=0;
+    for(let i=0;i<outputSize;i++){
+      sum += error[i]*W2[i][j];
+    }
+    hError[j] = sum * hDer[j];
+  }
+
+  for(let i=0;i<outputSize;i++){
+    for(let j=0;j<hiddenSize;j++){
+      W2[i][j] += alpha * error[i] * f.hAct[j];
+    }
+    b2[i] += alpha * error[i];
+  }
+
+  for(let i=0;i<hiddenSize;i++){
+    for(let j=0;j<inputSize;j++){
+      W1[i][j] += alpha * hError[i] * f.input[j];
+    }
+    b1[i] += alpha * hError[i];
+  }
+
+  epsilon *= 0.995;
+  if(epsilon < 0.05) epsilon = 0.05;
+}
+
+// DRAW
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  ctx.fillStyle="red";
+  ctx.fillRect(target.x*tileSize,target.y*tileSize,tileSize,tileSize);
+
+  ctx.fillStyle="orange";
+  ctx.fillRect(agent.x*tileSize,agent.y*tileSize,tileSize,tileSize);
+}
+
+// LOOP
+function loop(){
+  for(let i=0;i<speed;i++) stepAI();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function setSpeed(s){ speed=s; }
+
+loop();
+</script>
+
+</body>
+</html>
